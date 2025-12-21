@@ -15,7 +15,7 @@ const CONFIG = {
 
   // Branding complementar
   LOGO_URL:
-    "https://raw.githubusercontent.com/acardoso-dev/Gmail-Phishing-Reporter/refs/heads/public/logo.png",
+    "https://raw.githubusercontent.com/acardoso-dev/Gmail-Phishing-Reporter/refs/heads/online/logo.png",
 };
 
 /**
