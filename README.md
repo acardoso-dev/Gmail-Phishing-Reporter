@@ -16,13 +16,16 @@ Este add-on oferece duas ações principais:
 - **Reporte em Um Clique**: Interface simples integrada diretamente à barra lateral do Gmail.
 - **Preservação de Cabeçalhos**: Encaminha o e-mail original como anexo `.eml`, garantindo que todos os dados técnicos estejam disponíveis.
 - **Análise de IA (Gemini)**: Integração com **Google Gemini 1.5 Flash** para analisar o conteúdo e dar um veredito preliminar (apenas na opção "Solicitar Investigação").
+
   <img alt="" src="assets\reporte-ia.png">
 
 - **Relatório de IoCs**: Extrai automaticamente IPs, domínios, URLs e verifica autenticações (SPF, DKIM, DMARC) gerando um JSON pronto para ingestão em SIEM.
-  <img alt="" src="assets\reporte-iocs.png">
+
+  <img alt="" src="assets\reporte-ioc.png">
 
 - **Score de Risco**: Calcula uma pontuação de risco (0-100) baseada em falhas de autenticação e incompatibilidades de domínio, com mitigação inteligente para listas de distribuição (Google Groups).
-  <img alt="" src="assets\reporte-score.png">
+
+  <img alt="" src="assets\reporte-risco.png>
 
 ## Estrutura do Projeto
 
