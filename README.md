@@ -4,6 +4,8 @@
 
 Um Add-on para Gmail que permite aos usuários reportarem facilmente e-mails suspeitos para uma equipe de segurança designada com apenas um clique. Ao reportar um e-mail, ele é encaminhado como um anexo `.eml`, preservando todos os cabeçalhos originais para análise forense, além de gerar um relatório detalhado de Indicadores de Comprometimento (IoC) e análise via IA (Gemini).
 
+<img alt="" src="assets\infografico.png">
+
 Este add-on oferece duas ações principais:
 
 - **Reportar Phishing**: Encaminha o e-mail para um endereço predefinido para análise de rotina. Ideal para tentativas comuns de phishing onde não houve interação do usuário.
@@ -14,9 +16,13 @@ Este add-on oferece duas ações principais:
 - **Reporte em Um Clique**: Interface simples integrada diretamente à barra lateral do Gmail.
 - **Preservação de Cabeçalhos**: Encaminha o e-mail original como anexo `.eml`, garantindo que todos os dados técnicos estejam disponíveis.
 - **Análise de IA (Gemini)**: Integração com **Google Gemini 1.5 Flash** para analisar o conteúdo e dar um veredito preliminar (apenas na opção "Solicitar Investigação").
+  <img alt="" src="assets\reporte-ia.png">
+
 - **Relatório de IoCs**: Extrai automaticamente IPs, domínios, URLs e verifica autenticações (SPF, DKIM, DMARC) gerando um JSON pronto para ingestão em SIEM.
+  <img alt="" src="assets\reporte-iocs.png">
+
 - **Score de Risco**: Calcula uma pontuação de risco (0-100) baseada em falhas de autenticação e incompatibilidades de domínio, com mitigação inteligente para listas de distribuição (Google Groups).
-- **Customizável**: Configure endereços de destino, prefixos de assunto e branding facilmente.
+  <img alt="" src="assets\reporte-score.png">
 
 ## Estrutura do Projeto
 
