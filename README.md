@@ -25,7 +25,7 @@ Este add-on oferece duas ações principais:
 
 - **Score de Risco**: Calcula uma pontuação de risco (0-100) baseada em falhas de autenticação e incompatibilidades de domínio, com mitigação inteligente para listas de distribuição (Google Groups).
 
-  <img alt="" src="assets\reporte-risco.png>
+  <img alt="" src="assets\reporte-risco.png">
 
 ## Estrutura do Projeto
 
