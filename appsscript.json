@@ -3,7 +3,7 @@
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
   "urlFetchWhitelist": [
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/"
   ],
   "dependencies": {
     "enabledAdvancedServices": [
