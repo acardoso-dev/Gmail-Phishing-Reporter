@@ -16,6 +16,9 @@ const CONFIG = {
   // Branding complementar
   LOGO_URL:
     "https://raw.githubusercontent.com/acardoso-dev/Gmail-Phishing-Reporter/refs/heads/online/logo.png",
+
+  // URL do Webhook do Slack (Incoming Webhook) para envio de alertas
+  SLACK_WEBHOOK_URL: "",
 };
 
 /**

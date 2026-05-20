@@ -65,6 +65,53 @@ function analyzePhishingWithGemini(emailData) {
         )
       : "N/A";
 
+    // --- Extração de Imagens para Análise Multimodal (Quishing) ---
+    const imagesToSend = [];
+    if (emailData.gmailMessageId) {
+      try {
+        const msg = GmailApp.getMessageById(emailData.gmailMessageId);
+        const attachments = msg.getAttachments();
+        const minSize = 10 * 1024; // Mínimo de 10KB para filtrar ícones de redes sociais e assinaturas
+        
+        const imageAttachments = attachments.filter(function(att) {
+          const contentType = att.getContentType().toLowerCase();
+          return contentType.startsWith("image/") && att.getSize() >= minSize;
+        });
+
+        // Ordena por tamanho decrescente e limita às 3 maiores imagens
+        imageAttachments.sort(function(a, b) {
+          return b.getSize() - a.getSize();
+        });
+        const selectedImages = imageAttachments.slice(0, 3);
+
+        selectedImages.forEach(function(att) {
+          imagesToSend.push({
+            mimeType: att.getContentType(),
+            data: Utilities.base64Encode(att.getBytes())
+          });
+        });
+
+        if (imagesToSend.length > 0) {
+          console.log(`[IA] ${imagesToSend.length} imagem(ns) carregada(s) para análise de Quishing/ameaças visuais.`);
+        }
+      } catch (imgErr) {
+        console.warn("Falha ao ler imagens do e-mail para análise multimodal:", imgErr);
+      }
+    }
+
+    let visualPromptSection = "";
+    if (imagesToSend.length > 0) {
+      visualPromptSection = `
+      INSTRUÇÕES DE ANÁLISE VISUAL (IMAGENS EM ANEXO):
+      O e-mail contém ${imagesToSend.length} imagem(ns) relevante(s) anexada(s) ou inline (maior que 10KB).
+      Analise essas imagens cuidadosamente para detectar:
+      - QR Codes suspeitos (Quishing) e decodifique-os ou avalie a intenção se contiverem links para páginas de login ou URLs desconhecidas.
+      - Logotipos falsos de marcas (Microsoft, Google, bancos, etc.) que tentem personificar entidades confiáveis.
+      - Botões ou textos fraudulentos embutidos na imagem (ex: "Clique aqui para atualizar sua senha", "Ver fatura").
+      Mencione suas descobertas na "Análise de Segurança" e considere isso no "Veredito".
+      `;
+    }
+
     const prompt = `
       Você é um especialista em Cibersegurança e análise de Phishing.
       Analise o seguinte e-mail e forneça um relatório curto e direto para um analista de SOC.
@@ -80,10 +127,10 @@ function analyzePhishingWithGemini(emailData) {
       ${(emailData.raw || "").substring(0, 10000)} 
       """
       (O conteúdo pode estar truncado se for muito longo)
-
+      ${visualPromptSection}
       TAREFA:
       1. Resuma brevemente o que o e-mail está pedindo ou oferecendo (Narrativa).
-      2. Analise se parece phishing ou legítimo, citando evidências do conteúdo ou dos IoCs fornecidos.
+      2. Analise se parece phishing ou legítimo, citando evidências do conteúdo, dos IoCs fornecidos ou das imagens analisadas (se houver).
       3. Dê um veredito final: PHISHING, SUSPEITO ou LEGÍTIMO (com grau de confiança).
 
       FORMATO DE RESPOSTA (em Português do Brasil):
@@ -92,10 +139,20 @@ function analyzePhishingWithGemini(emailData) {
       • **Veredito**: [Sua conclusão]
     `;
 
+    const parts = [{ text: prompt }];
+    imagesToSend.forEach(function(img) {
+      parts.push({
+        inlineData: {
+          mimeType: img.mimeType,
+          data: img.data
+        }
+      });
+    });
+
     const payload = {
       contents: [
         {
-          parts: [{ text: prompt }],
+          parts: parts,
         },
       ],
     };

@@ -102,6 +102,41 @@ function createMainSection(emailData) {
     }
   }
 
+  // Authentication Checklist Widget
+  if (emailData && emailData.iocReport && emailData.iocReport.authenticationResults) {
+    const auth = emailData.iocReport.authenticationResults;
+    const spfText = getAuthStatusIcon(auth.spf);
+    const dkimText = getAuthStatusIcon(auth.dkim);
+    const dmarcText = getAuthStatusIcon(auth.dmarc);
+
+    const authText = `<b>Segurança do Remetente:</b>\n` +
+      `• SPF (IP Autorizado): ${spfText}\n` +
+      `• DKIM (Assinatura Cripto): ${dkimText}\n` +
+      `• DMARC (Política de Domínio): ${dmarcText}`;
+
+    section.addWidget(CardService.newDivider());
+    section.addWidget(
+      CardService.newTextParagraph().setText(authText)
+    );
+  }
+
+  // Sanitized URLs List Widget
+  if (emailData && emailData.iocReport && emailData.iocReport.urls && emailData.iocReport.urls.length > 0) {
+    const urlsList = emailData.iocReport.urls.slice(0, 5).map(function(u) {
+      return `• <font color="#555555"><code>${escapeHtml(defangUrl(u))}</code></font>`;
+    }).join("\n");
+    
+    let urlText = `<b>Links Encontrados (${emailData.iocReport.urls.length}):</b>\n${urlsList}`;
+    if (emailData.iocReport.urls.length > 5) {
+      urlText += `\n...e mais ${emailData.iocReport.urls.length - 5} links.`;
+    }
+    
+    section.addWidget(CardService.newDivider());
+    section.addWidget(
+      CardService.newTextParagraph().setText(urlText)
+    );
+  }
+
   return section
     .addWidget(CardService.newDivider())
     .addWidget(
@@ -226,6 +261,13 @@ function forwardEmail(e, subjectPrefix, reportType) {
       console.warn("Não foi possível aplicar o label:", labelErr);
     }
 
+    // --- Slack Integration ---
+    try {
+      sendSlackNotification(emailData, reportType);
+    } catch (slackErr) {
+      console.warn("Erro ao enviar notificação para o Slack:", slackErr);
+    }
+
     return createSuccessCard(reportType, messageId);
   } catch (error) {
     console.error(`Erro ao processar reporte (${reportType}):`, error);
@@ -252,6 +294,7 @@ function getEmailData(messageId) {
 
     return {
       raw: rawContent,
+      gmailMessageId: messageId,
       subject: cleanSubject(headers.subject || "Sem Assunto"),
       from: cleanEmailAddress(headers.from || "Remetente Desconhecido"),
       to: cleanEmailAddress(headers.to || "Destinatário Desconhecido"),
@@ -277,6 +320,7 @@ function getEmailData(messageId) {
         typeof message.getRawContent === "function"
           ? message.getRawContent()
           : message.getBody() || "",
+      gmailMessageId: messageId,
       subject: cleanSubject(message.getSubject()),
       from: cleanEmailAddress(message.getFrom()),
       to: cleanEmailAddress(message.getTo()),
@@ -1360,6 +1404,37 @@ function buildIocReportFromRaw(rawContent) {
     report.suspiciousFlags.push("arc_dara_fail");
   }
 
+  // Checar Display Name Spoofing usando lista de contatos
+  if (headers.from) {
+    const displayName = getDisplayName(headers.from);
+    if (displayName && displayName.length > 2) {
+      try {
+        const contacts = ContactsApp.getContactsByName(displayName);
+        if (contacts && contacts.length > 0) {
+          const senderEmail = cleanEmailAddress(headers.from);
+          let emailMatched = false;
+          
+          for (let i = 0; i < contacts.length; i++) {
+            const emails = contacts[i].getEmails();
+            for (let j = 0; j < emails.length; j++) {
+              if (emails[j].getAddress().toLowerCase() === senderEmail.toLowerCase()) {
+                emailMatched = true;
+                break;
+              }
+            }
+            if (emailMatched) break;
+          }
+          
+          if (!emailMatched) {
+            report.suspiciousFlags.push("display_name_spoofing_contacts");
+          }
+        }
+      } catch (contactErr) {
+        console.warn("Erro ao consultar a lista de contatos:", contactErr);
+      }
+    }
+  }
+
   // Risk Scoring Calculation
   report.riskAnalysis = calculateRiskScore(report);
 
@@ -1389,6 +1464,7 @@ const FLAG_WEIGHTS = {
   no_dkim: 20,
   dmarc_fail: 40,
   arc_fail: 15,
+  display_name_spoof: 45,
 };
 
 /**
@@ -1478,6 +1554,12 @@ function calculateRiskScore(report) {
     }
   }
 
+  // Display Name Spoofing baseada em Contatos
+  if (report.suspiciousFlags.includes("display_name_spoofing_contacts")) {
+    score += FLAG_WEIGHTS.display_name_spoof;
+    reasons.push("Display Name matches contact but email differs (+45)");
+  }
+
   const classification = classifyEmail(score);
 
   return {
@@ -1495,4 +1577,204 @@ function classifyEmail(score) {
   if (score >= 40) return "PHISHING LIKELY";
   if (score >= 20) return "SUSPICIOUS";
   return "BENIGN";
+}
+
+/**
+ * Sends a rich alert message to Slack using Incoming Webhooks.
+ *
+ * @param {Object} emailData The suspicious email data.
+ * @param {string} reportType The type of report ('phishing' or 'investigation').
+ */
+function sendSlackNotification(emailData, reportType) {
+  const webhookUrl = CONFIG.SLACK_WEBHOOK_URL;
+  if (!webhookUrl || !webhookUrl.startsWith("https://hooks.slack.com/")) {
+    console.log("Slack Webhook URL não configurada ou inválida. Notificação ignorada.");
+    return;
+  }
+
+  const reporter = Session.getActiveUser().getEmail();
+  const isInvestigation = reportType === "investigation";
+  
+  // Detalhes do Risco
+  const risk = (emailData.iocReport && emailData.iocReport.riskAnalysis) || {
+    score: 0,
+    classification: "UNKNOWN",
+    reasons: []
+  };
+
+  // Cores de barra lateral para o anexo do Slack baseadas na classificação
+  let riskColor = "#555555"; // Grey
+  if (risk.classification.includes("CONFIRMED")) riskColor = "#990000"; // Dark Red
+  else if (risk.classification.includes("LIKELY")) riskColor = "#d93025"; // Red
+  else if (risk.classification === "SUSPICIOUS") riskColor = "#f29900"; // Orange
+  else if (risk.classification === "BENIGN") riskColor = "#188038"; // Green
+
+  // Cabeçalho e Título
+  const emoji = isInvestigation ? "🚨" : "⚠️";
+  const title = isInvestigation 
+    ? "*Nova Solicitação de Investigação por IA*" 
+    : "*Novo Reporte de Phishing*";
+
+  // Blocos Slack
+  const blocks = [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": `${emoji} ${title}`
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": `*De:*\n${emailData.from}`
+        },
+        {
+          "type": "mrkdwn",
+          "text": `*Assunto:*\n${emailData.subject}`
+        },
+        {
+          "type": "mrkdwn",
+          "text": `*Repórter:*\n${reporter}`
+        },
+        {
+          "type": "mrkdwn",
+          "text": `*Data do E-mail:*\n${emailData.date ? emailData.date.toLocaleString("pt-BR") : "Desconhecida"}`
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": `*Risco de Segurança:*\n${risk.score}/100 (\`${risk.classification}\`)`
+        },
+        {
+          "type": "mrkdwn",
+          "text": `*Anexos do E-mail:*\n${emailData.attachments && emailData.attachments.length > 0 ? emailData.attachments.map(function(a){ return a.name; }).join(", ") : "Nenhum"}`
+        }
+      ]
+    }
+  ];
+
+  // Adiciona seção da Análise do Gemini se for investigação
+  if (isInvestigation && emailData.geminiAnalysis) {
+    blocks.push({
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": `*✨ Análise IA (Gemini):*\n${emailData.geminiAnalysis}`
+      }
+    });
+  }
+
+  // Adiciona motivos do score se houver
+  if (risk.reasons && risk.reasons.length > 0) {
+    blocks.push({
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": `*Motivos do Score:* ${risk.reasons.join(" | ")}`
+        }
+      ]
+    });
+  }
+
+  const payload = {
+    "text": isInvestigation ? `🚨 Investigação solicitada por ${reporter}` : `⚠️ Phishing reportado por ${reporter}`,
+    "attachments": [
+      {
+        "color": riskColor,
+        "blocks": blocks
+      }
+    ]
+  };
+
+  const options = {
+    "method": "post",
+    "contentType": "application/json",
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+
+  const response = UrlFetchApp.fetch(webhookUrl, options);
+  const responseCode = response.getResponseCode();
+  if (responseCode !== 200) {
+    console.error("Erro ao enviar notificação ao Slack. Código: " + responseCode + ". Resposta: " + response.getContentText());
+  } else {
+    console.log("✓ Notificação do Slack enviada com sucesso.");
+  }
+}
+
+/**
+ * Sanitiza uma URL (defanging) para evitar que seja clicável ou interpretada como link ativo.
+ * Ex: http://malicious.com/path -> hxxp://malicious[.]com/path
+ *
+ * @param {string} url A URL original.
+ * @returns {string} A URL sanitizada.
+ */
+function defangUrl(url) {
+  if (!url) return "";
+  
+  // Substitui http por hxxp, https por hxxps
+  let defanged = url.replace(/^http:/i, "hxxp:").replace(/^https:/i, "hxxps:");
+  
+  // Encontra a parte do domínio (entre // e a próxima / ou fim da string)
+  const match = defanged.match(/^(hxxps?:\/\/)([^\/\s]+)(.*)$/i);
+  if (match) {
+    const protocol = match[1];
+    const domain = match[2];
+    const path = match[3];
+    const defangedDomain = domain.replace(/\./g, "[.]");
+    return protocol + defangedDomain + path;
+  }
+  
+  return defanged.replace(/\./g, "[.]");
+}
+
+/**
+ * Converte um status de autenticação de e-mail (SPF/DKIM/DMARC) em um texto com emoji amigável.
+ *
+ * @param {string} status O status bruto (ex: 'pass', 'fail', 'softfail').
+ * @returns {string} O status formatado para exibição visual.
+ */
+function getAuthStatusIcon(status) {
+  if (!status) return "⚪ Desconhecido / Ausente";
+  
+  const normalized = status.toLowerCase().trim();
+  if (normalized === "pass") {
+    return "🟢 PASS";
+  }
+  if (normalized.indexOf("fail") !== -1) {
+    return "🔴 FAIL";
+  }
+  if (normalized === "neutral" || normalized === "none" || normalized === "temperror" || normalized === "permerror") {
+    return "🟡 " + normalized.toUpperCase();
+  }
+  
+  return "⚪ " + status.toUpperCase();
+}
+
+/**
+ * Extrai o nome de exibição (Display Name) a partir do cabeçalho From bruto.
+ * Ex: "John Doe" <john@example.com> -> John Doe
+ *
+ * @param {string} fromHeader O cabeçalho From bruto.
+ * @returns {string} O Display Name limpo.
+ */
+function getDisplayName(fromHeader) {
+  if (!fromHeader) return "";
+  // Combina com formatos contendo <email> ex: "Nome" <email@dom.com> ou Nome <email@dom.com>
+  const match = fromHeader.match(/^\s*["']?([^"']+)["']?\s*<[^>]+>/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return "";
 }
