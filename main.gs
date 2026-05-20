@@ -122,13 +122,23 @@ function createMainSection(emailData) {
 
   // Sanitized URLs List Widget
   if (emailData && emailData.iocReport && emailData.iocReport.urls && emailData.iocReport.urls.length > 0) {
-    const urlsList = emailData.iocReport.urls.slice(0, 5).map(function(u) {
-      return `• <font color="#555555"><code>${escapeHtml(defangUrl(u))}</code></font>`;
+    const uniqueDefanged = [];
+    const seen = new Set();
+    emailData.iocReport.urls.forEach(function(u) {
+      const defanged = defangUrl(u, true);
+      if (defanged && !seen.has(defanged)) {
+        seen.add(defanged);
+        uniqueDefanged.push(defanged);
+      }
+    });
+
+    const urlsList = uniqueDefanged.slice(0, 5).map(function(d) {
+      return `• <font color="#555555"><code>${escapeHtml(d)}</code></font>`;
     }).join("\n");
     
     let urlText = `<b>Links Encontrados (${emailData.iocReport.urls.length}):</b>\n${urlsList}`;
-    if (emailData.iocReport.urls.length > 5) {
-      urlText += `\n...e mais ${emailData.iocReport.urls.length - 5} links.`;
+    if (uniqueDefanged.length > 5) {
+      urlText += `\n...e mais ${uniqueDefanged.length - 5} domínios.`;
     }
     
     section.addWidget(CardService.newDivider());
@@ -1312,16 +1322,159 @@ function computeSha256Hex(text) {
 
 /**
  * Extrai URLs do corpo (HTML + plain) — útil para IoC.
+ * Trata codificações MIME como Quoted-Printable e Base64 recursivamente.
  */
 function extractUrlsFromBody(rawContent) {
-  // tenta pegar a parte após o header, até o final; simplificação rápida
-  const body = rawContent
-    .split(/\r?\n\r?\n/)
-    .slice(1)
-    .join("\n\n");
-  const urlRegex = /https?:\/\/[^\s"'<>()]+/gi;
-  const urls = body.match(urlRegex) || [];
-  return Array.from(new Set(urls));
+  const textParts = [];
+  
+  // Processa uma parte MIME recursivamente
+  function processPart(headers, body) {
+    const contentTypeMatch = headers.match(/Content-Type:\s*([^\s;]+)/i);
+    const contentType = contentTypeMatch ? contentTypeMatch[1].toLowerCase() : "text/plain";
+    
+    if (contentType.startsWith("multipart/")) {
+      const subBoundaryMatch = headers.match(/boundary=["']?([^"';\r\n]+)["']?/i);
+      if (subBoundaryMatch) {
+        const subBoundary = subBoundaryMatch[1];
+        const subParts = body.split("--" + subBoundary);
+        for (let i = 1; i < subParts.length - 1; i++) {
+          const subPart = subParts[i];
+          const splitIdx = subPart.search(/\r?\n\r?\n/);
+          if (splitIdx !== -1) {
+            const subHeaders = subPart.substring(0, splitIdx);
+            const subBody = subPart.substring(splitIdx).replace(/^\r?\n\r?\n/, "");
+            processPart(subHeaders, subBody);
+          }
+        }
+      }
+    } else if (contentType.startsWith("text/html") || contentType.startsWith("text/plain")) {
+      const encodingMatch = headers.match(/Content-Transfer-Encoding:\s*([^\s;]+)/i);
+      const encoding = encodingMatch ? encodingMatch[1].toLowerCase() : "";
+      
+      let decodedBody = body;
+      if (encoding === "quoted-printable") {
+        decodedBody = decodeQuotedPrintable(body);
+      } else if (encoding === "base64") {
+        decodedBody = decodeBase64(body);
+      }
+      textParts.push(decodedBody);
+    }
+  }
+  
+  // 1. Tenta decodificar via estrutura MIME
+  const splitIdx = rawContent.search(/\r?\n\r?\n/);
+  if (splitIdx !== -1) {
+    const headers = rawContent.substring(0, splitIdx);
+    const body = rawContent.substring(splitIdx).replace(/^\r?\n\r?\n/, "");
+    processPart(headers, body);
+  }
+  
+  // 2. Fail-safe Fallback: Se o parsing MIME falhar ou não encontrar partes,
+  // ou para garantir que não perdemos nada, decodificamos o conteúdo bruto como QP
+  const qpDecodedRaw = decodeQuotedPrintable(rawContent);
+  textParts.push(qpDecodedRaw);
+  
+  // 3. Extração e limpeza de URLs
+  const combinedBody = textParts.join("\n\n");
+  const urlRegex = /https?:\/\/[^\s"'<>()\\]+/gi;
+  const rawUrls = combinedBody.match(urlRegex) || [];
+  
+  const cleanedUrls = [];
+  const seen = new Set();
+  
+  rawUrls.forEach(function(url) {
+    // Limpeza de caracteres finais indesejados
+    let cleanUrl = url.replace(/["';,>]+$/, "");
+    
+    // Filtro de namespaces XML, esquemas W3C e metadados que não são links reais
+    if (cleanUrl && !isExcludedUrl(cleanUrl)) {
+      if (!seen.has(cleanUrl)) {
+        seen.add(cleanUrl);
+        cleanedUrls.push(cleanUrl);
+      }
+    }
+  });
+  
+  return cleanedUrls;
+}
+
+/**
+ * Filtra URLs de metadados, esquemas XML e namespaces (como w3.org, schemas.microsoft.com).
+ */
+function isExcludedUrl(url) {
+  const lowercaseUrl = url.toLowerCase();
+  const exclusionPatterns = [
+    "w3.org",
+    "schemas.microsoft.com",
+    "schemas.xmlsoap.org",
+    "xml.org",
+    "openxmlformats.org",
+    "schemas.google.com",
+    "activex.microsoft.com",
+    "schemas.openxmlformats.org"
+  ];
+  return exclusionPatterns.some(function(pattern) {
+    return lowercaseUrl.indexOf(pattern) !== -1;
+  });
+}
+
+/**
+ * Decodifica o formato Quoted-Printable.
+ */
+function decodeQuotedPrintable(text) {
+  if (!text) return "";
+  
+  // 1. Remove quebras de linha suaves (sinal de igual no fim da linha)
+  const temp = text.replace(/=\r?\n/g, "");
+  
+  // 2. Converte os bytes hexadecimais (=XX)
+  const bytes = [];
+  for (let i = 0; i < temp.length; i++) {
+    const charCode = temp.charCodeAt(i);
+    if (charCode === 61 && i + 2 < temp.length) { // 61 é '='
+      const hex = temp.substring(i + 1, i + 3);
+      if (/^[0-9A-F]{2}$/i.test(hex)) {
+        bytes.push(parseInt(hex, 16));
+        i += 2;
+        continue;
+      }
+    }
+    
+    if (charCode < 128) {
+      bytes.push(charCode);
+    } else {
+      const encoded = unescape(encodeURIComponent(temp.charAt(i)));
+      for (let j = 0; j < encoded.length; j++) {
+        bytes.push(encoded.charCodeAt(j));
+      }
+    }
+  }
+  
+  const signedBytes = bytes.map(function(b) {
+    return b > 127 ? b - 256 : b;
+  });
+  
+  try {
+    return Utilities.newBlob(signedBytes).getDataAsString("UTF-8");
+  } catch (e) {
+    return temp.replace(/=([0-9A-F]{2})/gi, function(match, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+  }
+}
+
+/**
+ * Decodifica o formato Base64.
+ */
+function decodeBase64(text) {
+  if (!text) return "";
+  try {
+    const cleaned = text.replace(/\s+/g, "");
+    const decodedBytes = Utilities.base64Decode(cleaned);
+    return Utilities.newBlob(decodedBytes).getDataAsString("UTF-8");
+  } catch (e) {
+    return text;
+  }
 }
 
 /**
@@ -1615,6 +1768,55 @@ function sendSlackNotification(emailData, reportType) {
     ? "*Nova Solicitação de Investigação por IA*" 
     : "*Novo Reporte de Phishing*";
 
+  // --- IoC Data Preparation ---
+  const ioc = emailData.iocReport || {};
+
+  const receivedIpsStr =
+    ioc.receivedIPs && ioc.receivedIPs.length > 0
+      ? ioc.receivedIPs.join(", ")
+      : "Nenhum identificado";
+
+  const authResults = ioc.authenticationResults || {};
+  const authStr = `SPF: ${authResults.spf || "N/A"}, DKIM: ${authResults.dkim || "N/A"}, DMARC: ${authResults.dmarc || "N/A"}`;
+
+  const flagsStr =
+    ioc.suspiciousFlags && ioc.suspiciousFlags.length > 0
+      ? ioc.suspiciousFlags.join(", ")
+      : "Nenhuma flag automática";
+
+  let reputationLinksStr = "Nenhum IP para consultar";
+  if (ioc.receivedIPs && ioc.receivedIPs.length > 0) {
+    reputationLinksStr = ioc.receivedIPs.map(function(ip) {
+      const vt = `https://www.virustotal.com/gui/ip-address/${ip}`;
+      const shodan = `https://www.shodan.io/host/${ip}`;
+      const abuse = `https://www.abuseipdb.com/check/${ip}`;
+      const talos = `https://talosintelligence.com/reputation_center/lookup?search=${ip}`;
+      return `• *${ip}*: <${vt}|VirusTotal> | <${shodan}|Shodan> | <${abuse}|AbuseIPDB> | <${talos}|Talos>`;
+    }).join("\n");
+  }
+
+  const fromDomain = getDomainFromEmail(emailData.from);
+  const returnPathDomain = getDomainFromEmail(emailData.returnPath);
+  const spoofingCheckStr = `• *From:* \`${fromDomain}\`\n` +
+    `• *Return-Path:* \`${emailData.returnPath || "N/A"}\` (Domínio: \`${returnPathDomain}\`)\n` +
+    `• *Flags:* \`${flagsStr}\``;
+
+  const emailDate = emailData.date
+    ? emailData.date.toISOString().replace("T", " ").split(".")[0] + " UTC"
+    : "Data desconhecida";
+
+  const urlsList = ioc.urls && ioc.urls.length > 0
+    ? ioc.urls.slice(0, 5).map(function(u) { return `\`${defangUrl(u)}\``; }).join("\n")
+    : "Nenhuma identificada";
+  const urlsCountText = ioc.urls && ioc.urls.length > 5
+    ? `\n...e mais ${ioc.urls.length - 5} URLs.`
+    : "";
+
+  const attachmentInfo =
+    emailData.attachments && emailData.attachments.length > 0
+      ? emailData.attachments.map((a) => a.name).join(", ")
+      : "Nenhum";
+
   // Blocos Slack
   const blocks = [
     {
@@ -1629,42 +1831,51 @@ function sendSlackNotification(emailData, reportType) {
     },
     {
       "type": "section",
-      "fields": [
-        {
-          "type": "mrkdwn",
-          "text": `*De:*\n${emailData.from}`
-        },
-        {
-          "type": "mrkdwn",
-          "text": `*Assunto:*\n${emailData.subject}`
-        },
-        {
-          "type": "mrkdwn",
-          "text": `*Repórter:*\n${reporter}`
-        },
-        {
-          "type": "mrkdwn",
-          "text": `*Data do E-mail:*\n${emailData.date ? emailData.date.toLocaleString("pt-BR") : "Desconhecida"}`
-        }
-      ]
+      "text": {
+        "type": "mrkdwn",
+        "text": `*ANÁLISE DE RISCO (SOC)*\n` +
+          `• *Score:* ${risk.score}/100\n` +
+          `• *Classificação:* \`${risk.classification}\`\n` +
+          `• *Motivos:* ${risk.reasons && risk.reasons.length > 0 ? risk.reasons.join(" | ") : "Nenhum fator de risco identificado."}`
+      }
+    },
+    {
+      "type": "divider"
     },
     {
       "type": "section",
-      "fields": [
-        {
-          "type": "mrkdwn",
-          "text": `*Risco de Segurança:*\n${risk.score}/100 (\`${risk.classification}\`)`
-        },
-        {
-          "type": "mrkdwn",
-          "text": `*Anexos do E-mail:*\n${emailData.attachments && emailData.attachments.length > 0 ? emailData.attachments.map(function(a){ return a.name; }).join(", ") : "Nenhum"}`
-        }
-      ]
+      "text": {
+        "type": "mrkdwn",
+        "text": `*Detalhes do e-mail suspeito*\n` +
+          `• *De:* ${emailData.from}\n` +
+          `• *Para:* ${emailData.to}\n` +
+          `• *Assunto:* ${emailData.subject}\n` +
+          `• *Data do e-mail:* ${emailDate}`
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": `*Indicators of Compromise (IoC)*\n` +
+          `• *IPs de Origem:* ${receivedIpsStr}\n` +
+          `• *Consultar Reputação:*\n${reputationLinksStr}\n` +
+          `• *Autenticação:* ${authStr}\n\n` +
+          `*Spoofing Check*\n${spoofingCheckStr}\n\n` +
+          `*URLs Encontradas:*\n${urlsList}${urlsCountText}\n\n` +
+          `*Anexos:* ${attachmentInfo}`
+      }
     }
   ];
 
   // Adiciona seção da Análise do Gemini se for investigação
   if (isInvestigation && emailData.geminiAnalysis) {
+    blocks.push({
+      "type": "divider"
+    });
     blocks.push({
       "type": "section",
       "text": {
@@ -1674,18 +1885,32 @@ function sendSlackNotification(emailData, reportType) {
     });
   }
 
-  // Adiciona motivos do score se houver
-  if (risk.reasons && risk.reasons.length > 0) {
-    blocks.push({
-      "type": "context",
-      "elements": [
-        {
-          "type": "mrkdwn",
-          "text": `*Motivos do Score:* ${risk.reasons.join(" | ")}`
-        }
-      ]
-    });
+  // Adiciona contexto/footer
+  blocks.push({
+    "type": "divider"
+  });
+  
+  const contextElements = [
+    {
+      "type": "mrkdwn",
+      "text": `*Repórter:* ${reporter}`
+    }
+  ];
+  
+  if (emailData.messageId) {
+    const rfc822Link = buildRfc822SearchLink(emailData.messageId);
+    if (rfc822Link) {
+      contextElements.push({
+        "type": "mrkdwn",
+        "text": `*Gmail:* <${rfc822Link}|Buscar por Message-ID>`
+      });
+    }
   }
+
+  blocks.push({
+    "type": "context",
+    "elements": contextElements
+  });
 
   const payload = {
     "text": isInvestigation ? `🚨 Investigação solicitada por ${reporter}` : `⚠️ Phishing reportado por ${reporter}`,
@@ -1718,22 +1943,30 @@ function sendSlackNotification(emailData, reportType) {
  * Ex: http://malicious.com/path -> hxxp://malicious[.]com/path
  *
  * @param {string} url A URL original.
+ * @param {boolean} [domainOnly] Se verdadeiro, retorna apenas o protocolo e o domínio.
  * @returns {string} A URL sanitizada.
  */
-function defangUrl(url) {
+function defangUrl(url, domainOnly) {
   if (!url) return "";
   
   // Substitui http por hxxp, https por hxxps
   let defanged = url.replace(/^http:/i, "hxxp:").replace(/^https:/i, "hxxps:");
   
   // Encontra a parte do domínio (entre // e a próxima / ou fim da string)
-  const match = defanged.match(/^(hxxps?:\/\/)([^\/\s]+)(.*)$/i);
+  const match = defanged.match(/^(hxxps?:\/\/)([^\/\s?#]+)(.*)$/i);
   if (match) {
     const protocol = match[1];
     const domain = match[2];
     const path = match[3];
     const defangedDomain = domain.replace(/\./g, "[.]");
-    return protocol + defangedDomain + path;
+    return protocol + defangedDomain + (domainOnly ? "" : path);
+  }
+  
+  if (domainOnly) {
+    const simpleMatch = defanged.match(/^([^\/\s?#]+)(.*)$/);
+    if (simpleMatch) {
+      return simpleMatch[1].replace(/\./g, "[.]");
+    }
   }
   
   return defanged.replace(/\./g, "[.]");
