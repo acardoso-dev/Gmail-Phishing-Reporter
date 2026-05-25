@@ -22,7 +22,7 @@ function installAddOn() {
 
     console.log("\n✓ Instalação completa - Pronto para implantação");
     console.log(`✓ Relatórios de phishing serão enviados para: ${CONFIG.PHISHING_EMAIL}`);
-    console.log(`✓ Solicitações de investigação serão enviadas para: ${CONFIG.INVESTIGATION_EMAIL}`);
+    console.log(`✓ Solicitações de investigação serão enviadas para o próprio usuário que reportar (para receber a análise)`);
     console.log("\nPróximos passos:");
     console.log("1. Implantar como add-on do Gmail");
     console.log("2. Instalar na sua organização");

@@ -5,9 +5,8 @@
  * Update these values before deployment
  */
 const CONFIG = {
-  // Endereços de e-mail para onde serão enviados os relatórios
-  PHISHING_EMAIL: "MY-MAIL", // Para reportes de phishing
-  INVESTIGATION_EMAIL: "MY-MAIL", // Para solicitações de investigação
+  // Endereço de e-mail para onde serão enviados os relatórios de phishing
+  PHISHING_EMAIL: "MY-MAIL",
 
   // Email subject prefixes
   PHISHING_PREFIX: "[PHISHING]", // Apenas para conhecimento, não é necessária resposta.
@@ -33,7 +32,7 @@ function getSecurityEmail(reportType) {
     case "phishing":
       return CONFIG.PHISHING_EMAIL;
     case "investigation":
-      return CONFIG.INVESTIGATION_EMAIL;
+      return Session.getActiveUser().getEmail();
     default:
       throw new Error(`Tipo de reporte inválido: ${reportType}`);
   }
@@ -48,13 +47,6 @@ function getSecurityEmail(reportType) {
 function validateConfig() {
   if (!CONFIG.PHISHING_EMAIL || !CONFIG.PHISHING_EMAIL.includes("@")) {
     throw new Error("PHISHING_EMAIL inválido em Config.js");
-  }
-
-  if (
-    !CONFIG.INVESTIGATION_EMAIL ||
-    !CONFIG.INVESTIGATION_EMAIL.includes("@")
-  ) {
-    throw new Error("INVESTIGATION_EMAIL inválido em Config.js");
   }
 
   console.log("✓ Configuração validada");

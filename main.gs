@@ -1078,8 +1078,6 @@ function getUserTimeZone() {
       const domain = userEmail.split("@")[1].toLowerCase();
 
       const domainTimeZones = {
-        "acardoso.dev": "America/Sao_Paulo",
-        "dev-acardoso.atlassian.net": "America/Sao_Paulo",
         "gmail.com": "America/Sao_Paulo",
         "google.com": "America/Sao_Paulo",
       };
@@ -1940,7 +1938,7 @@ function sendSlackNotification(emailData, reportType) {
 
 /**
  * Sanitiza uma URL (defanging) para evitar que seja clicável ou interpretada como link ativo.
- * Ex: http://malicious.com/path -> hxxp://malicious[.]com/path
+ * Ex: http://malicious.com/path -> http://malicious[.]com/path
  *
  * @param {string} url A URL original.
  * @param {boolean} [domainOnly] Se verdadeiro, retorna apenas o protocolo e o domínio.
@@ -1949,11 +1947,8 @@ function sendSlackNotification(emailData, reportType) {
 function defangUrl(url, domainOnly) {
   if (!url) return "";
   
-  // Substitui http por hxxp, https por hxxps
-  let defanged = url.replace(/^http:/i, "hxxp:").replace(/^https:/i, "hxxps:");
-  
   // Encontra a parte do domínio (entre // e a próxima / ou fim da string)
-  const match = defanged.match(/^(hxxps?:\/\/)([^\/\s?#]+)(.*)$/i);
+  const match = url.match(/^(https?:\/\/)([^\/\s?#]+)(.*)$/i);
   if (match) {
     const protocol = match[1];
     const domain = match[2];
@@ -1963,13 +1958,13 @@ function defangUrl(url, domainOnly) {
   }
   
   if (domainOnly) {
-    const simpleMatch = defanged.match(/^([^\/\s?#]+)(.*)$/);
+    const simpleMatch = url.match(/^([^\/\s?#]+)(.*)$/);
     if (simpleMatch) {
       return simpleMatch[1].replace(/\./g, "[.]");
     }
   }
   
-  return defanged.replace(/\./g, "[.]");
+  return url.replace(/\./g, "[.]");
 }
 
 /**

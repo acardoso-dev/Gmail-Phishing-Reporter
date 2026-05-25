@@ -53,8 +53,7 @@ Este add-on oferece duas ações principais:
 
 Abra o arquivo `config.gs` e atualize as variáveis:
 
-- `PHISHING_EMAIL`: E-mail para onde enviar os reportes padrão.
-- `INVESTIGATION_EMAIL`: E-mail para onde enviar as solicitações de investigação.
+- `PHISHING_EMAIL`: E-mail para onde enviar os reportes padrão. (Nota: As solicitações de investigação são enviadas diretamente ao próprio usuário que reportar).
 
 ### 3. Configurar a Chave de API do Gemini
 
