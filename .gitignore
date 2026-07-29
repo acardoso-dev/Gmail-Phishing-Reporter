@@ -1,0 +1,23 @@
+# clasp: contém o scriptId do projeto e credenciais
+.clasp.json
+.clasprc.json
+.clasp-*.json
+
+# Node (usado apenas pela suíte de testes)
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Segredos: chaves e webhooks vivem em Propriedades do Script, nunca no repo
+.env
+.env.*
+*.key
+secrets.json
+
+# Sistema operacional e editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp

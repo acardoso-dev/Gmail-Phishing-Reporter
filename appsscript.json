@@ -1,0 +1,43 @@
+{
+  "timeZone": "America/Sao_Paulo",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "urlFetchWhitelist": [
+    "https://generativelanguage.googleapis.com/",
+    "https://hooks.slack.com/",
+    "https://people.googleapis.com/"
+  ],
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Gmail",
+        "serviceId": "gmail",
+        "version": "v1"
+      }
+    ]
+  },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/gmail.addons.execute",
+    "https://www.googleapis.com/auth/gmail.addons.current.message.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.locale"
+  ],
+  "addOns": {
+    "common": {
+      "name": "Gmail Phishing - IA",
+      "logoUrl": "https://raw.githubusercontent.com/acardoso-dev/Gmail-Phishing-Reporter/refs/heads/online/logo.png",
+      "useLocaleFromApp": true
+    },
+    "gmail": {
+      "contextualTriggers": [
+        {
+          "unconditional": {},
+          "onTriggerFunction": "buildAddOn"
+        }
+      ]
+    }
+  }
+}

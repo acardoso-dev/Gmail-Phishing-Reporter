@@ -1,0 +1,4 @@
+# Enviado ao Apps Script: apenas .gs e o manifesto.
+**/**
+!*.gs
+!appsscript.json
